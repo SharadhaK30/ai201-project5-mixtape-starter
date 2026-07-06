@@ -51,3 +51,13 @@ Routes mostly do HTTP-specific work: parse request fields, call one service func
 **The root cause:** The query returned all playlist rows in the correct order, but the service intentionally converted only `songs[:-1]` to dictionaries. In Python, `[:-1]` means every item except the last one, so the final playlist entry was removed for every non-empty playlist.
 
 **Your fix and side-effect check:** I changed the return statement to iterate over `songs` instead of `songs[:-1]`. This preserves the existing ordering query and keeps empty playlists returning an empty list. I verified this with the playlist tests, including the order and empty-playlist cases.
+
+### Issue 4: I Got Notified When a Friend Added My Song to a Playlist but Not When They Rated It
+
+**How I reproduced it:** I added `tests/test_notifications.py` with a sharer, a different rater, and a song owned by the sharer. Calling `rate_song(rater_id, song_id, 5)` saved the rating, but querying `Notification` for the sharer returned no rows. The companion self-rating test confirmed that rating your own song should not create a notification.
+
+**How I found the root cause:** I traced `POST /songs/<song_id>/rate` from `routes/songs.py` into `services/notification_service.rate_song()`. Then I compared that function with `add_to_playlist()` in the same service. `add_to_playlist()` both performs the playlist action and calls `create_notification()` for the original sharer, but `rate_song()` only inserted or updated the `Rating` row and returned.
+
+**The root cause:** Rating a song and notifying the song sharer were split architecturally: the route called `rate_song()`, but `rate_song()` had no notification side effect. Since no other code path wrapped or followed the rating write with `create_notification()`, successful ratings by friends never produced a `song_rated` notification.
+
+**Your fix and side-effect check:** I added a `create_notification()` call after the rating commit when `song.shared_by != user_id`, matching the playlist notification pattern. The notification body names the rater, song title, and score. I added regression tests for both friend ratings and self-ratings, and both pass.
