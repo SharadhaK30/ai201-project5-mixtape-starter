@@ -4,6 +4,19 @@
 
 I used Codex to help navigate the unfamiliar Flask codebase, summarize the responsibilities of the route and service modules, and trace route-to-service flows before making changes. I also used it to run the test suite, compare failing test output with the service code, and draft root cause analysis notes while the code paths were fresh. I verified each diagnosis against the source files and test results before applying fixes.
 
+The most useful AI help was during orientation: I asked it to explain the model relationships, association tables, and route-to-service call chains in plain language, then checked those explanations against the source files myself. During debugging, I used AI to reason about edge cases like Python's `datetime.weekday()` return values and to compare the working playlist notification flow with the missing rating-notification flow. One place I had to verify rather than trust the AI was Issue 3: the search query looks suspicious because it joins through `song_tags`, but the existing `tests/test_search.py` passed in this SQLAlchemy version, so I did not count that issue as a fixed bug.
+
+## Submission Checklist
+
+- Branch: `bugfix/mixtape`
+- Fixed bugs: Issues 1, 2, 4, and 5
+- Stretch coverage: fixed a fourth bug and added regression tests for notification and feed behavior
+- Test command: `.venv/bin/python -m pytest tests/`
+- Final test result: 16 tests passed
+- Git log screenshot: `artifacts/git-log-screenshot.png`
+
+![git log --oneline screenshot](artifacts/git-log-screenshot.png)
+
 ## Codebase Map
 
 ### Main Files and Roles
@@ -29,6 +42,8 @@ I used Codex to help navigate the unfamiliar Flask codebase, summarize the respo
 ### Pattern Noticed
 
 Routes mostly do HTTP-specific work: parse request fields, call one service function, and format JSON responses. Business rules live in `services/`, while persistence details live in `models.py` and SQLAlchemy queries. Some service functions commit directly, so side effects such as creating a notification need to be handled deliberately in the same service path that performs the user action.
+
+The app also uses a consistent serialization pattern: models expose `to_dict()` methods, and routes return those dictionaries through `jsonify()`. Many-to-many relationships are represented with association tables: `friendships` connects users to friends, `song_tags` connects songs to tags, and `playlist_entries` connects playlists to songs while also storing ordering and audit fields like `position`, `added_by`, and `added_at`.
 
 ## Root Cause Analyses
 
@@ -71,3 +86,17 @@ Routes mostly do HTTP-specific work: parse request fields, call one service func
 **The root cause:** `RECENT_THRESHOLD` was set to `timedelta(hours=24)`. That made the "listening now" feed behave like a last-day feed, so events from yesterday but still within twenty-four hours were included. The activity feed already exists for broader history; listening-now needs a much shorter recency window.
 
 **Your fix and side-effect check:** I changed `RECENT_THRESHOLD` to thirty minutes, matching the seed data's recent-listening examples. The query and per-friend deduplication stayed the same, and `get_activity_feed()` remains unfiltered because that broader behavior is documented separately in the service. The new feed regression test passes.
+
+## Issue Investigated but Not Counted
+
+I also investigated Issue 3, "The same song keeps showing up twice in search." The search service does perform an unnecessary outer join through `song_tags`, which is a plausible source of duplicate SQL rows for songs with multiple tags. However, in the current dependency set, SQLAlchemy returns one `Song` ORM object per primary key identity for this query, and the existing multi-tag search regression test passed before I made any changes. Because I could not reproduce the user-visible duplicate behavior in this repo version, I did not claim Issue 3 as a fixed bug.
+
+## Final Verification
+
+I ran the full test suite after all fixes:
+
+```text
+16 passed
+```
+
+I also seeded the database successfully with `seed_data.py` and smoke-tested the Flask app at `127.0.0.1:5000`.
