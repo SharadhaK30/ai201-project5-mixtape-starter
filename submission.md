@@ -9,15 +9,42 @@ The most useful AI help was during orientation: I asked it to explain the model 
 ## Submission Checklist
 
 - Branch: `bugfix/mixtape`
-- Fixed bugs: Issues 1, 2, 4, and 5
-- Stretch coverage: fixed a fourth bug and added regression tests for notification and feed behavior
+- Fixed bugs: Issues 1, 2, 3, 4, and 5
+- Stretch coverage: fixed all five listed bugs and added regression tests for notification and feed behavior
 - Test command: `.venv/bin/python -m pytest tests/`
 - Final test result: 16 tests passed
-- Git log screenshot: `artifacts/git-log-screenshot.png`
+- Git log screenshot: `artifacts/git-log-screenshot-dark.png`
 
-![git log --oneline screenshot](artifacts/git-log-screenshot.png)
+![git log --oneline screenshot](artifacts/git-log-screenshot-dark.png)
 
 ## Codebase Map
+
+### Visual Map
+
+```text
+HTTP request
+    |
+    v
+routes/
+  songs.py       -> search_service.py        -> Song, Tag data
+                 -> notification_service.py  -> Rating, Notification
+                 -> streak_service.py        -> ListeningEvent, User streak
+
+  playlists.py   -> playlist_service.py      -> Playlist, playlist_entries
+                 -> notification_service.py  -> playlist-add notifications
+
+  users.py       -> streak_service.py        -> User listening_streak
+                 -> notification_service.py  -> Notification read/unread state
+
+  feed.py        -> feed_service.py          -> ListeningEvent feed queries
+    |
+    v
+models.py
+  User <-> friendships <-> User
+  Song <-> song_tags <-> Tag
+  Playlist <-> playlist_entries <-> Song
+  User -> Song / Rating / ListeningEvent / Notification / Playlist
+```
 
 ### Main Files and Roles
 
@@ -44,6 +71,16 @@ The most useful AI help was during orientation: I asked it to explain the model 
 Routes mostly do HTTP-specific work: parse request fields, call one service function, and format JSON responses. Business rules live in `services/`, while persistence details live in `models.py` and SQLAlchemy queries. Some service functions commit directly, so side effects such as creating a notification need to be handled deliberately in the same service path that performs the user action.
 
 The app also uses a consistent serialization pattern: models expose `to_dict()` methods, and routes return those dictionaries through `jsonify()`. Many-to-many relationships are represented with association tables: `friendships` connects users to friends, `song_tags` connects songs to tags, and `playlist_entries` connects playlists to songs while also storing ordering and audit fields like `position`, `added_by`, and `added_at`.
+
+### All-Issues Map
+
+| Issue | Service | Symptom | Root cause | Fix | Verification |
+|---|---|---|---|---|---|
+| 1 | `streak_service.py` | Saturday-to-Sunday listening reset the streak. | The consecutive-day branch excluded `today.weekday() == 6`, which is Sunday. | Removed the Sunday exclusion so all one-day gaps increment. | `tests/test_streaks.py` |
+| 2 | `feed_service.py` | "Listening now" included friends from yesterday. | `RECENT_THRESHOLD` was 24 hours, which made the endpoint a last-day feed. | Changed the threshold to 30 minutes. | `tests/test_feed.py` |
+| 3 | `search_service.py` | Multi-tag songs could be represented by duplicate SQL rows. | The search joined `song_tags` even though filtering only used `Song.title` and `Song.artist`. | Removed the unnecessary join so the query is one row per song. | `tests/test_search.py` |
+| 4 | `notification_service.py` | Rating a friend's song saved the rating but sent no notification. | `rate_song()` committed the `Rating` but never called `create_notification()`. | Added a `song_rated` notification for the original sharer when someone else rates their song. | `tests/test_notifications.py` |
+| 5 | `playlist_service.py` | The final playlist song was missing. | The service returned `songs[:-1]`, which drops the last item. | Returned all queried songs. | `tests/test_playlists.py` |
 
 ## Root Cause Analyses
 
@@ -87,9 +124,19 @@ The app also uses a consistent serialization pattern: models expose `to_dict()` 
 
 **Your fix and side-effect check:** I changed `RECENT_THRESHOLD` to thirty minutes, matching the seed data's recent-listening examples. The query and per-friend deduplication stayed the same, and `get_activity_feed()` remains unfiltered because that broader behavior is documented separately in the service. The new feed regression test passes.
 
-## Issue Investigated but Not Counted
+### Issue 3: The Same Song Keeps Showing Up Twice in Search
 
-I also investigated Issue 3, "The same song keeps showing up twice in search." The search service does perform an unnecessary outer join through `song_tags`, which is a plausible source of duplicate SQL rows for songs with multiple tags. However, in the current dependency set, SQLAlchemy returns one `Song` ORM object per primary key identity for this query, and the existing multi-tag search regression test passed before I made any changes. Because I could not reproduce the user-visible duplicate behavior in this repo version, I did not claim Issue 3 as a fixed bug.
+**How I reproduced it:** I used `tests/test_search.py`, which creates songs with zero, one, and three tags and searches for the multi-tag song. In the current SQLAlchemy version, the ORM-level result already collapsed duplicate `Song` identities, so the user-visible duplicate did not fail in the existing test. The query was still structurally wrong because the generated SQL joined `song_tags`, producing one SQL row per tag before ORM identity handling.
+
+**How I found the root cause:** I traced `GET /songs/search?q=...` from `routes/songs.py` to `services/search_service.search_songs()`. The filter only checks `Song.title` and `Song.artist`, but the query performed an outer join against `song_tags`. Since tag names are not part of the search condition and `Song.tags` are already loaded through the model relationship when `to_dict()` runs, that join was unnecessary.
+
+**The root cause:** The service mixed two concerns: finding matching songs and loading their tags. Searching by title or artist does not require `song_tags`, but joining the tag table multiplies SQL rows for songs with multiple tags. Depending on result handling, that shape can surface as repeated songs.
+
+**Your fix and side-effect check:** I removed the unused `song_tags` join and unused imports so the search query starts from `Song` and filters only on song fields. The response still includes tags because `Song.to_dict()` reads the `tags` relationship. I verified the full search test file still passes, including no-match, no-tag, one-tag, and multi-tag cases.
+
+## Issue Originally Investigated Carefully
+
+Issue 3 needed extra verification because the current ORM behavior made the existing user-visible duplicate test pass before the fix. I still fixed the risky query shape by removing the join that could create duplicate SQL rows, but I did not pretend the existing pytest suite had failed for that issue.
 
 ## Final Verification
 
