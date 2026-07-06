@@ -61,3 +61,13 @@ Routes mostly do HTTP-specific work: parse request fields, call one service func
 **The root cause:** Rating a song and notifying the song sharer were split architecturally: the route called `rate_song()`, but `rate_song()` had no notification side effect. Since no other code path wrapped or followed the rating write with `create_notification()`, successful ratings by friends never produced a `song_rated` notification.
 
 **Your fix and side-effect check:** I added a `create_notification()` call after the rating commit when `song.shared_by != user_id`, matching the playlist notification pattern. The notification body names the rater, song title, and score. I added regression tests for both friend ratings and self-ratings, and both pass.
+
+### Issue 2: Friends Listening Now Shows People from Yesterday
+
+**How I reproduced it:** I added `tests/test_feed.py` with a viewer, two friends, and two listening events: one from ten minutes ago and one from twenty-three hours ago. Calling `get_friends_listening_now(viewer.id)` returned both friends, so the stale event appeared in the listening-now feed.
+
+**How I found the root cause:** I traced `GET /feed/<user_id>/listening-now` from `routes/feed.py` to `services/feed_service.get_friends_listening_now()`. The function builds a cutoff from `RECENT_THRESHOLD`, filters friend listening events after that cutoff, and then deduplicates to the most recent event per friend. The issue was the threshold constant at the top of the service.
+
+**The root cause:** `RECENT_THRESHOLD` was set to `timedelta(hours=24)`. That made the "listening now" feed behave like a last-day feed, so events from yesterday but still within twenty-four hours were included. The activity feed already exists for broader history; listening-now needs a much shorter recency window.
+
+**Your fix and side-effect check:** I changed `RECENT_THRESHOLD` to thirty minutes, matching the seed data's recent-listening examples. The query and per-friend deduplication stayed the same, and `get_activity_feed()` remains unfiltered because that broader behavior is documented separately in the service. The new feed regression test passes.
