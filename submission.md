@@ -13,11 +13,8 @@ The most useful AI help was during orientation: I asked it to explain the model 
 - Stretch coverage: fixed all five listed bugs and added regression tests for notification and feed behavior
 - Test command: `.venv/bin/python -m pytest tests/`
 - Final test result: 16 tests passed
-- Git log screenshot: `artifacts/git-log-screenshot-dark.png`
-
-![git log --oneline screenshot](artifacts/git-log-screenshot-dark.png)
-<img width="1220" height="380" alt="image" src="https://github.com/user-attachments/assets/548a5b7d-314d-4a2f-9fff-fff6df4f3df5" />
-
+- Git log screenshot: 
+<img width="1003" height="257" alt="Screenshot 2026-07-06 at 12 33 49 AM" src="https://github.com/user-attachments/assets/bc5db7bd-41bd-4da0-b23c-d4782c57b0f0" />
 
 ## Codebase Map
 
