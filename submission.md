@@ -42,3 +42,12 @@ Routes mostly do HTTP-specific work: parse request fields, call one service func
 
 **Your fix and side-effect check:** I changed the condition so every `days_since_last == 1` case increments the streak. The existing same-day and skipped-day branches still handle duplicate listens and missed days separately, so Monday-to-Tuesday increments and Monday-to-Wednesday resets remain unchanged. I verified this with the streak test file.
 
+### Issue 5: The Last Song in a Playlist Never Shows Up
+
+**How I reproduced it:** I ran `.venv/bin/python -m pytest tests/test_playlists.py`. The test fixture created a playlist with five ordered songs, but `get_playlist_songs()` returned only four titles: `Track 1` through `Track 4`.
+
+**How I found the root cause:** I traced `GET /playlists/<playlist_id>/songs` from `routes/playlists.py` to `services/playlist_service.get_playlist_songs()`. The SQLAlchemy query joined `Song` through `playlist_entries`, filtered by playlist id, and ordered by `position`, which matched the data model. The suspicious part was the final list comprehension slicing `songs[:-1]`.
+
+**The root cause:** The query returned all playlist rows in the correct order, but the service intentionally converted only `songs[:-1]` to dictionaries. In Python, `[:-1]` means every item except the last one, so the final playlist entry was removed for every non-empty playlist.
+
+**Your fix and side-effect check:** I changed the return statement to iterate over `songs` instead of `songs[:-1]`. This preserves the existing ordering query and keeps empty playlists returning an empty list. I verified this with the playlist tests, including the order and empty-playlist cases.
