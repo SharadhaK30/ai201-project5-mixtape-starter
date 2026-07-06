@@ -16,6 +16,8 @@ The most useful AI help was during orientation: I asked it to explain the model 
 - Git log screenshot: `artifacts/git-log-screenshot-dark.png`
 
 ![git log --oneline screenshot](artifacts/git-log-screenshot-dark.png)
+<img width="1220" height="380" alt="image" src="https://github.com/user-attachments/assets/548a5b7d-314d-4a2f-9fff-fff6df4f3df5" />
+
 
 ## Codebase Map
 
