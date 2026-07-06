@@ -32,3 +32,13 @@ Routes mostly do HTTP-specific work: parse request fields, call one service func
 
 ## Root Cause Analyses
 
+### Issue 1: My Listening Streak Keeps Resetting
+
+**How I reproduced it:** I ran the existing streak tests with `.venv/bin/python -m pytest tests/`. `test_streak_increments_on_sunday` created a user, recorded a Saturday listen, then recorded a Sunday listen. The streak stayed at `1` instead of increasing to `2`.
+
+**How I found the root cause:** I traced `POST /songs/<song_id>/listen` in `routes/songs.py` to `services/streak_service.record_listening_event()`, then into `update_listening_streak()`. The failing test pointed at the Saturday-to-Sunday boundary, and the key line was the `days_since_last == 1 and today.weekday() != 6` condition.
+
+**The root cause:** The service correctly calculated that Saturday to Sunday is a one-day gap, but then excluded Sundays from the consecutive-day increment path. Python's `weekday()` returns `6` for Sunday, so a valid consecutive listen on Sunday fell into the reset branch and set the streak back to `1`.
+
+**Your fix and side-effect check:** I changed the condition so every `days_since_last == 1` case increments the streak. The existing same-day and skipped-day branches still handle duplicate listens and missed days separately, so Monday-to-Tuesday increments and Monday-to-Wednesday resets remain unchanged. I verified this with the streak test file.
+
